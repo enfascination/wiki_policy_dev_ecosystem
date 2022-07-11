@@ -1,0 +1,9 @@
+SELECT distinct ?item ?itemLabel ?type ?linkcount #?lang ?sitelink ?name ?linkcount
+WHERE {
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE]". }
+  ?item wdt:P31 ?type. 
+  ?type wdt:P279* wd:Q4656150 . # is in namespace 4 (hopefully)
+  ?item wikibase:sitelinks ?linkcount  . 
+  filter(?linkcount >= 2) . 
+}
+ORDER BY DESC(?linkcount)
