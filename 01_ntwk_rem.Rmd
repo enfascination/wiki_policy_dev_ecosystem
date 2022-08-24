@@ -1,0 +1,123 @@
+---
+title: "01_ntwk_rem"
+output: word_document
+date: '2022-08-18'
+---
+
+```{r}
+library(lubridate)
+library(ggplot2)
+library(rem)
+library(dplyr)
+library(survival)
+
+
+library(relevant)
+library(informR)
+
+
+setwd("~/Dropbox/BIGSSS Social Cohesion/Project")
+link <- read.csv("220711_1_sitelink.csv")
+link$QID <- sub(".*/wiki/", "", link$url) 
+#vec-Q4994848 no time stamp
+link <- subset(link, link$hreflang!="vec")
+```
+
+
+# turn timestamp into date, week
+```{r}
+link$date = substr(link$time_stamp, 1, 10) 
+link$date = as_date(link$date)
+link$week = as.Date(cut(link$date, breaks = "week", start.on.monday = T)) # weekly break point is Monday
+link$adoption=1
+
+daily=aggregate(adoption~date, link, sum)
+weekly=aggregate(adoption~week, link, sum)
+
+```
+
+# weekly count
+```{r}
+fig=ggplot(weekly, aes(x=week, y=adoption))
+fig+geom_smooth(stat="smooth", method = "loess", formula = y ~ x, se = FALSE, span=0.18, color="black")+
+  theme_bw()+
+  labs(x="Week", y="Weekly Policy Adoptions")+
+  theme(
+    axis.title.y = element_text(size=12,face="bold",margin = margin(r = 20)),
+    strip.text = element_text(size=12,face="bold"),
+    axis.title.x.bottom = element_text(size=12,face="bold",margin=margin(15,0,0,0)),
+    axis.title.y.left = element_text(size=12,face="bold",margin=margin(0,15,0,0)),
+    axis.text.x = element_text(size=8,face="bold"),
+    axis.text.y = element_text(size=12,face="bold")
+  )+
+  scale_x_date(date_breaks = "year", date_labels = "%Y")+
+  scale_y_continuous(breaks=c(0:10))
+
+```
+#create time variable REM data structure
+```{r}
+link$time.week = (interval("2001-07-16", link$week) %/% weeks(26)) + 1 #the time intervel is 26 weeks, half a year
+link <- link[order(link$time.week),]
+```
+
+#create REM data structure
+```{r}
+REM.data <- createRemDataset(
+  data = link, sender = link$api_lang_code,
+  target = link$QID,
+  eventSequence = link$time.week)
+```
+
+#attributes
+```{r}
+#REM.data <- merge(REM.data, unique(?[,c(?,?)]))
+```
+
+#calculate network statistics
+```{r}
+REM.data <- REM.data[order(REM.data$eventTime),]
+
+#wiki and policy degree centrality
+REM.data$lang.deg <- degreeStat(time = REM.data$eventTime, 
+                                degreevar = REM.data$sender,
+                                eventvar = REM.data$eventDummy,
+                                halflife = .7, inParallel= T, cluster=4)
+
+REM.data$QID.deg <- degreeStat(time = REM.data$eventTime,
+                               degreevar = REM.data$target,
+                               eventvar = REM.data$eventDummy,
+                               halflife = .7, inParallel= T, cluster=4)
+
+```
+
+```{r}
+#four-cycle closure (takes a long time)
+REM.data$four.cycles <- fourCycleStat(time = REM.data$eventTime, 
+                                      sender =REM.data$sender, 
+                                      target=REM.data$target, 
+                                      eventvar = REM.data$eventDummy,
+                                      halflife = .7, inParallel= T, cluster=4)
+#halflife = .7 more recent event take priority
+#cluster -- decrease computational time
+
+```
+
+#estimate the model
+```{r}
+
+model <- clogit(eventDummy~lang.deg + QID.deg
+                +four.cycles,
+                data=REM.data,
+                method = "approximate")
+summary(model)
+
+AIC(model)
+BIC(model)
+
+#Interpretation of results
+#lang.deg: wikis that have adopted a larger number of policies in the past are 1.15 times more likely to adopt policies
+#QID.deg: policies that have been adopted by a larger number of wikis in the past, are 1.1 times more likely to be further adopted by more wikis
+#four.cycles: inertia—two wikis are 6 times more likely to share a policy, if they already share a policy.
+
+```
+
